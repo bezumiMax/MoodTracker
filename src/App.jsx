@@ -1,184 +1,187 @@
 import React from 'react';
 import { createAssistant, createSmartappDebugger } from '@salutejs/client';
-
+import { pipeline } from '@xenova/transformers';
+import { kmeans } from 'ml-kmeans';
 import './App.css';
-import { TaskList } from './pages/TaskList';
 
-const initializeAssistant = (getState /*: any*/, getRecoveryState) => {
+// 1. Инициализация ассистента (вынесена за пределы класса)
+const initializeAssistant = (getState) => {
+  // Выводим в консоль начало токена для проверки связи с .env
+  console.log("DEBUG: Инициализация с токеном:", process.env.REACT_APP_TOKEN?.substring(0, 10) + "...");
+
   if (process.env.NODE_ENV === 'development') {
     return createSmartappDebugger({
       token: process.env.REACT_APP_TOKEN ?? '',
       initPhrase: `Запусти ${process.env.REACT_APP_SMARTAPP}`,
-      getState,                                           
-      // getRecoveryState: getState,                                           
+      getState,
       nativePanel: {
-        defaultText: 'Говорите!',
+        defaultText: 'Скажи команду',
         screenshotMode: false,
         tabIndex: -1,
-    },
+      },
+      voice: 'off', 
     });
-  } else {
-  return createAssistant({ getState });
   }
+  return createAssistant({ getState });
 };
 
+// 2. Основной класс приложения
 export class App extends React.Component {
   constructor(props) {
     super(props);
-    console.log('constructor');
-
-    this.state = {
-      notes: [{ id: Math.random().toString(36).substring(7), title: 'тест' }],
+    this.state = { 
+      moods: [], 
+      clusters: [], 
+      model: null, 
+      loading: true 
     };
-
-    this.assistant = initializeAssistant(() => this.getStateForAssistant());
-
-    this.assistant.on('data', (event /*: any*/) => {
-      console.log(`assistant.on(data)`, event);
-      if (event.type === 'character') {
-        console.log(`assistant.on(data): character: "${event?.character?.id}"`);
-      } else if (event.type === 'insets') {
-        console.log(`assistant.on(data): insets`);
-      } else {
-        const { action } = event;
-        this.dispatchAssistantAction(action);
-      }
-    });
-
-    this.assistant.on('start', (event) => {
-      let initialData = this.assistant.getInitialData();
-
-      console.log(`assistant.on(start)`, event, initialData);
-    });
-
-    this.assistant.on('command', (event) => {
-      console.log(`assistant.on(command)`, event);
-    });
-
-    this.assistant.on('error', (event) => {
-      console.log(`assistant.on(error)`, event);
-    });
-
-    this.assistant.on('tts', (event) => {
-      console.log(`assistant.on(tts)`, event);
-    });
+    this.assistant = null;
   }
 
-  componentDidMount() {
-    console.log('componentDidMount');
-  }
+  async componentDidMount() {
+    console.log("Приложение запущено. Начинаю подключение...");
 
-  getStateForAssistant() {
-    console.log('getStateForAssistant: this.state:', this.state);
-    const state = {
-      item_selector: {
-        items: this.state.notes.map(({ id, title }, index) => ({
-          number: index + 1,
-          id,
-          title,
-        })),
-        ignored_words: [
-          'добавить','установить','запиши','поставь','закинь','напомнить', // addNote.sc
-          'удалить', 'удали',  // deleteNote.sc
-          'выполни', 'выполнил', 'сделал' // выполнил|сделал
-        ],
-      },
-    };
-    console.log('getStateForAssistant: state:', state);
-    return state;
+    // А) Сначала запускаем Салют (Приоритет)
+    try {
+      this.assistant = initializeAssistant(() => ({ moods: this.state.moods }));
+
+      this.assistant.on('start', () => {
+        console.log('✅ Ассистент готов! Теперь шар должен крутиться.');
+      });
+
+      this.assistant.on('data', (event) => {
+        console.log('Получены данные от Салюта:', event);
+        const textFromBot = event.character?.text || event.payload?.text || '';
+        
+        // Обработка текстовых команд
+        if (textFromBot.includes('COMMAND_ADD_MOOD')) {
+          const phrase = textFromBot
+            .replace('COMMAND_ADD_MOOD', '')
+            .replace('запиши настроение', '')
+            .trim();
+          if (phrase) this.addMood(phrase);
+        }
+
+        if (textFromBot.includes('COMMAND_SHOW_STATS')) {
+          this.showStats();
+        }
+
+        // Обработка экшенов (если настроены в SmartApp Studio)
+        if (event.type === 'smart_app_data' && event.action) {
+          this.dispatchAssistantAction(event.action);
+        }
+      });
+
+      this.assistant.on('error', (err) => {
+        console.error('❌ Ошибка связи с Салютом (WebSocket):', err);
+      });
+
+    } catch (e) {
+      console.error("Ошибка инициализации SDK:", e);
+    }
+
+    // Б) Загрузка ML модели в фоновом режиме
+    pipeline('feature-extraction', 'Xenova/rubert-tiny-turbo', {
+      allowRemoteModels: true 
+    })
+      .then(extractor => {
+        this.setState({ model: extractor, loading: false });
+        console.log("✅ ML модель успешно загружена");
+      })
+      .catch(err => {
+        this.setState({ loading: false });
+        console.warn("⚠️ ML модель не загружена. Работаем без векторизации.", err.message);
+      });
   }
 
   dispatchAssistantAction(action) {
-    console.log('dispatchAssistantAction', action);
-    if (action) {
-      switch (action.type) {
-        case 'add_note':
-          return this.add_note(action);
+    console.log('Action received:', action.type);
+    if (action.type === 'ADD_MOOD' && action.payload) {
+      this.addMood(action.payload);
+    } else if (action.type === 'SHOW_STATS') {
+      this.showStats();
+    }
+  }
 
-        case 'done_note':
-          return this.done_note(action);
-
-        case 'delete_note':
-          return this.delete_note(action);
-
-        default:
-          throw new Error();
+  async addMood(text) {
+    let embedding = [];
+    if (this.state.model) {
+      try {
+        const output = await this.state.model(text, { pooling: 'mean', normalize: true });
+        embedding = Array.from(output.data);
+      } catch (e) {
+        console.error("Ошибка векторизации фразы:", e);
       }
     }
-  }
 
-  add_note(action) {
-    console.log('add_note', action);
-    this.setState({
-      notes: [
-        ...this.state.notes,
-        {
-          id: Math.random().toString(36).substring(7),
-          title: action.note,
-          completed: false,
-        },
-      ],
-    });
-  }
-
-  done_note(action) {
-    console.log('done_note', action);
-    this.setState({
-      notes: this.state.notes.map((note) =>
-        note.id === action.id ? { ...note, completed: !note.completed } : note
-      ),
-    });
-  }
-
-  _send_action_value(action_id, value) {
-    const data = {
-      action: {
-        action_id: action_id,
-        parameters: {
-          // значение поля parameters может быть любым, но должно соответствовать серверной логике
-          value: value, // см.файл src/sc/noteDone.sc смартаппа в Studio Code
-        },
-      },
+    const mood = {
+      id: Math.random().toString(36).substring(7),
+      rawPhrase: text,
+      timestamp: new Date().toLocaleTimeString(),
+      embedding: embedding,
     };
-    const unsubscribe = this.assistant.sendData(data, (data) => {
-      // функция, вызываемая, если на sendData() был отправлен ответ
-      const { type, payload } = data;
-      console.log('sendData onData:', type, payload);
-      unsubscribe();
-    });
+
+    this.setState((prev) => ({ moods: [...prev.moods, mood] }));
   }
 
-  play_done_note(id) {
-    const completed = this.state.notes.find(({ id }) => id)?.completed;
-    if (!completed) {
-      const texts = ['Молодец!', 'Красавчик!', 'Супер!'];
-      const idx = (Math.random() * texts.length) | 0;
-      this._send_action_value('done', texts[idx]);
+  showStats() {
+    const { moods } = this.state;
+    const vectors = moods.map(m => m.embedding).filter(v => v && v.length > 0);
+    
+    if (vectors.length < 2) {
+      console.warn("Нужно хотя бы 2 записи для кластеризации");
+      return;
     }
-  }
 
-  delete_note(action) {
-    console.log('delete_note', action);
-    this.setState({
-      notes: this.state.notes.filter(({ id }) => id !== action.id),
-    });
+    try {
+      const k = Math.min(vectors.length, 3);
+      const ans = kmeans(vectors, k);
+      
+      const clusters = ans.clusters.map((clusterIdx, i) => ({
+        name: `Группа ${clusterIdx + 1}`,
+        phrase: moods[i].rawPhrase,
+        color: ['#4caf50', '#f44336', '#2196f3', '#ff9800'][clusterIdx] || '#ccc'
+      }));
+
+      this.setState({ clusters });
+    } catch (e) {
+      console.error("Ошибка K-means:", e);
+    }
   }
 
   render() {
-    console.log('render');
+    const { moods, clusters, loading } = this.state;
     return (
-      <>
-        <TaskList
-          items={this.state.notes}
-          onAdd={(note) => {
-            this.add_note({ type: 'add_note', note });
-          }}
-          onDone={(note) => {
-            this.play_done_note(note.id);
-            this.done_note({ type: 'done_note', id: note.id });
-          }}
-        />
-      </>
+      <div className="container" style={{ padding: '20px', background: '#121212', minHeight: '100vh', color: 'white' }}>
+        <header>
+          <h1>🎙 Mood Tracker {loading && <span style={{fontSize: '14px', color: '#888'}}>(Загрузка ML...)</span>}</h1>
+          <p>Скажи: "Запиши настроение [текст]"</p>
+        </header>
+
+        <div style={{ display: 'flex', gap: '20px', marginTop: '20px' }}>
+          <section className="card" style={{ flex: 1, border: '1px solid #333', padding: '15px' }}>
+            <h3>История настроений ({moods.length})</h3>
+            {moods.length === 0 && <p style={{color: '#666'}}>Записей пока нет</p>}
+            {moods.map(m => (
+              <div key={m.id} style={{ marginBottom: '10px', borderBottom: '1px solid #222' }}>
+                <small>{m.timestamp}</small>
+                <p>{m.rawPhrase}</p>
+              </div>
+            ))}
+          </section>
+
+          <section className="card" style={{ flex: 1, border: '1px solid #333', padding: '15px' }}>
+            <h3>Анализ (Кластеры)</h3>
+            {clusters.length === 0 && <p style={{color: '#666'}}>Добавьте минимум 2 записи</p>}
+            {clusters.map((c, i) => (
+              <div key={i} style={{ borderLeft: `4px solid ${c.color}`, paddingLeft: '10px', marginBottom: '10px' }}>
+                <span style={{ color: c.color, fontWeight: 'bold' }}>{c.name}</span>
+                <p>{c.phrase}</p>
+              </div>
+            ))}
+          </section>
+        </div>
+      </div>
     );
   }
 }
