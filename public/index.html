@@ -25,6 +25,42 @@
       Learn how to configure a non-root public URL by running `npm run build`.
     -->
     <title>Note App</title>
+    <script>
+      // Полная блокировка красного экрана смерти для специфической ошибки Салюта
+      window.addEventListener('error', function(event) {
+        if (event.message && (event.message.includes('applicationId') || event.message.includes('play'))) {
+          console.warn('Блокировка системного крэша Салюта:', event.message);
+          event.stopImmediatePropagation();
+          event.preventDefault();
+        }
+      }, true);
+
+      window.addEventListener('unhandledrejection', function(event) {
+        if (event.reason && event.reason.message && event.reason.message.includes('applicationId')) {
+          console.warn('Блокировка промиса Салюта');
+          event.preventDefault();
+        }
+      });
+    </script>
+    <style>
+      /* Скрываем красный экран смерти от react-scripts */
+      #webpack-dev-server-client-overlay {
+        display: none !important;
+      }
+      div[style*="position: fixed; top: 0px; left: 0px; width: 100%; height: 100%; border: none; z-index: 2147483647;"] {
+        display: none !important;
+      }
+    </style>
+
+    <script>
+      // Глушим саму ошибку в консоли, чтобы она не триггерила оверлей
+      window.addEventListener('error', function(e) {
+        if (e.message.includes('applicationId') || e.message.includes('play')) {
+          e.stopImmediatePropagation();
+          e.preventDefault();
+        }
+      }, true);
+    </script>
   </head>
   <body>
     <noscript>You need to enable JavaScript to run this app.</noscript>

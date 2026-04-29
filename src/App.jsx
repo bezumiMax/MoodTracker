@@ -2,190 +2,183 @@ import React from 'react';
 import { createAssistant, createSmartappDebugger } from '@salutejs/client';
 
 import './App.css';
+import { TaskList } from './pages/TaskList';
 
-const initializeAssistant = (getState) => {
+const initializeAssistant = (getState /*: any*/, getRecoveryState) => {
   if (process.env.NODE_ENV === 'development') {
     return createSmartappDebugger({
       token: process.env.REACT_APP_TOKEN ?? '',
       initPhrase: `Запусти ${process.env.REACT_APP_SMARTAPP}`,
-      getState,
+      getState,                                           
+      // getRecoveryState: getState,                                           
       nativePanel: {
-        defaultText: 'Скажи команду',
+        defaultText: 'Говорите!',
         screenshotMode: false,
         tabIndex: -1,
-      },
+    },
     });
   } else {
-    return createAssistant({ getState });
+  return createAssistant({ getState });
   }
 };
 
 export class App extends React.Component {
   constructor(props) {
     super(props);
+    console.log('constructor');
 
     this.state = {
-      moods: [],
-      clusters: [],
+      notes: [{ id: Math.random().toString(36).substring(7), title: 'тест' }],
     };
 
     this.assistant = initializeAssistant(() => this.getStateForAssistant());
 
-    this.assistant.on('data', (event) => {
-      console.log('assistant event:', event);
-
-      if (event?.type === 'character' || event?.type === 'insets') {
-        return;
+    this.assistant.on('data', (event /*: any*/) => {
+      console.log(`assistant.on(data)`, event);
+      if (event.type === 'character') {
+        console.log(`assistant.on(data): character: "${event?.character?.id}"`);
+      } else if (event.type === 'insets') {
+        console.log(`assistant.on(data): insets`);
+      } else {
+        const { action } = event;
+        this.dispatchAssistantAction(action);
       }
+    });
 
-      // ВАЖНО: action = сам event
-      this.dispatchAssistantAction(event);
+    this.assistant.on('start', (event) => {
+      let initialData = this.assistant.getInitialData();
+
+      console.log(`assistant.on(start)`, event, initialData);
+    });
+
+    this.assistant.on('command', (event) => {
+      console.log(`assistant.on(command)`, event);
+    });
+
+    this.assistant.on('error', (event) => {
+      console.log(`assistant.on(error)`, event);
+    });
+
+    this.assistant.on('tts', (event) => {
+      console.log(`assistant.on(tts)`, event);
     });
   }
 
-  /* =========================
-      STATE FOR ASSISTANT
-  ========================== */
+  componentDidMount() {
+    console.log('componentDidMount');
+  }
 
   getStateForAssistant() {
-    return {
-      moods: this.state.moods,
+    console.log('getStateForAssistant: this.state:', this.state);
+    const state = {
+      item_selector: {
+        items: this.state.notes.map(({ id, title }, index) => ({
+          number: index + 1,
+          id,
+          title,
+        })),
+        ignored_words: [
+          'добавить','установить','запиши','поставь','закинь','напомнить', // addNote.sc
+          'удалить', 'удали',  // deleteNote.sc
+          'выполни', 'выполнил', 'сделал' // выполнил|сделал
+        ],
+      },
     };
+    console.log('getStateForAssistant: state:', state);
+    return state;
   }
-
-  /* =========================
-      DISPATCH
-  ========================== */
 
   dispatchAssistantAction(action) {
-    if (!action || !action.type) return;
+    console.log('dispatchAssistantAction', action);
+    if (action) {
+      switch (action.type) {
+        case 'add_note':
+          return this.add_note(action);
 
-    console.log('ACTION:', action);
+        case 'done_note':
+          return this.done_note(action);
 
-    switch (action.type) {
-      case 'ADD_MOOD':
-        return this.addMood(action);
+        case 'delete_note':
+          return this.delete_note(action);
 
-      case 'REMOVE_LAST_MOOD':
-        return this.removeLastMood();
-
-      case 'SHOW_STATS':
-        return this.showStats();
-
-      default:
-        console.warn('Unknown action:', action);
-    }
-  }
-
-  /* =========================
-      ACTIONS
-  ========================== */
-
-  addMood(action) {
-    const text = action.payload?.text || '';
-
-    const mood = {
-      id: Math.random().toString(36).substring(7),
-      timestamp: Date.now(),
-      rawPhrase: text,
-      moodLabel: this.extractMood(text),
-      embedding: [],
-      clusterId: null,
-      note: null,
-    };
-
-    this.setState({
-      moods: [...this.state.moods, mood],
-    });
-  }
-
-  removeLastMood() {
-    this.setState({
-      moods: this.state.moods.slice(0, -1),
-    });
-  }
-
-  showStats() {
-    const grouped = {};
-
-    this.state.moods.forEach((m) => {
-      if (!grouped[m.moodLabel]) {
-        grouped[m.moodLabel] = [];
+        default:
+          throw new Error();
       }
-      grouped[m.moodLabel].push(m);
-    });
-
-    const clusters = Object.entries(grouped).map(([label, items]) => ({
-      name: label,
-      members: items,
-      color: this.getColor(label),
-    }));
-
-    this.setState({ clusters });
-  }
-
-  /* =========================
-      HELPERS
-  ========================== */
-
-  extractMood(text) {
-    const t = text.toLowerCase();
-
-    if (t.includes('рад') || t.includes('счаст')) return 'позитивное';
-    if (t.includes('груст') || t.includes('печал')) return 'негативное';
-    if (t.includes('трев')) return 'тревожное';
-
-    return 'нейтральное';
-  }
-
-  getColor(label) {
-    switch (label) {
-      case 'позитивное':
-        return '#4caf50';
-      case 'негативное':
-        return '#f44336';
-      case 'тревожное':
-        return '#ff9800';
-      default:
-        return '#9e9e9e';
     }
   }
 
-  /* =========================
-      UI
-  ========================== */
+  add_note(action) {
+    console.log('add_note', action);
+    this.setState({
+      notes: [
+        ...this.state.notes,
+        {
+          id: Math.random().toString(36).substring(7),
+          title: action.note,
+          completed: false,
+        },
+      ],
+    });
+  }
+
+  done_note(action) {
+    console.log('done_note', action);
+    this.setState({
+      notes: this.state.notes.map((note) =>
+        note.id === action.id ? { ...note, completed: !note.completed } : note
+      ),
+    });
+  }
+
+  _send_action_value(action_id, value) {
+    const data = {
+      action: {
+        action_id: action_id,
+        parameters: {
+          // значение поля parameters может быть любым, но должно соответствовать серверной логике
+          value: value, // см.файл src/sc/noteDone.sc смартаппа в Studio Code
+        },
+      },
+    };
+    const unsubscribe = this.assistant.sendData(data, (data) => {
+      // функция, вызываемая, если на sendData() был отправлен ответ
+      const { type, payload } = data;
+      console.log('sendData onData:', type, payload);
+      unsubscribe();
+    });
+  }
+
+  play_done_note(id) {
+    const completed = this.state.notes.find(({ id }) => id)?.completed;
+    if (!completed) {
+      const texts = ['Молодец!', 'Красавчик!', 'Супер!'];
+      const idx = (Math.random() * texts.length) | 0;
+      this._send_action_value('done', texts[idx]);
+    }
+  }
+
+  delete_note(action) {
+    console.log('delete_note', action);
+    this.setState({
+      notes: this.state.notes.filter(({ id }) => id !== action.id),
+    });
+  }
 
   render() {
+    console.log('render');
     return (
-      <div style={{ padding: 20 }}>
-        <h2>🎙 Mood Tracker</h2>
-
-        <div style={{ marginBottom: 20 }}>
-          <b>Скажи:</b>
-          <ul>
-            <li>Добавь настроение я рад</li>
-            <li>Удали последнее настроение</li>
-            <li>Покажи статистику</li>
-          </ul>
-        </div>
-
-        <h3>📌 Настроения</h3>
-        {this.state.moods.length === 0 && <div>Пока пусто</div>}
-
-        {this.state.moods.map((m) => (
-          <div key={m.id}>
-            {m.rawPhrase} — <b>{m.moodLabel}</b>
-          </div>
-        ))}
-
-        <h3 style={{ marginTop: 20 }}>📊 Кластеры</h3>
-
-        {this.state.clusters.map((c) => (
-          <div key={c.name} style={{ color: c.color }}>
-            {c.name}: {c.members.length}
-          </div>
-        ))}
-      </div>
+      <>
+        <TaskList
+          items={this.state.notes}
+          onAdd={(note) => {
+            this.add_note({ type: 'add_note', note });
+          }}
+          onDone={(note) => {
+            this.play_done_note(note.id);
+            this.done_note({ type: 'done_note', id: note.id });
+          }}
+        />
+      </>
     );
   }
 }
