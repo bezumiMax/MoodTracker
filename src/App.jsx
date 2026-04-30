@@ -74,7 +74,11 @@ export class App extends React.Component {
       // ПЕРЕДАЕМ ТОКЕН ВТОРЫМ АРГУМЕНТОМ
       this.assistant = initializeAssistant(
         () => ({ moods: this.state.moods }), 
-        MY_TOKEN
+        MY_TOKEN,
+        {
+          appId: "019d0b2b-405e-79da-b5c1-6d7d83a50b96", // Это поможет SDK найти твой навык
+          isFirstSession: true,
+        }
       );
 
       this.assistant.on('data', (event) => {
