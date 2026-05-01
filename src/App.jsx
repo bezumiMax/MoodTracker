@@ -4,6 +4,16 @@ import { pipeline, env } from '@xenova/transformers';
 import { kmeans } from 'ml-kmeans';
 import './App.css';
 
+// Фикс для внутренней логики SDK
+if (typeof window !== 'undefined') {
+    window.appConfig = {
+        applicationId: "019de0cf-282b-7797-a8e1-7ae166bef0c6",
+        appversionId: "1.0.0"
+    };
+    // Иногда SDK ищет ID в другом месте, подстрахуемся:
+    window.__STP_CONFIG__ = window.appConfig;
+}
+
 // 1. Оставляем только функцию-конструктор. 
 // Она НЕ вызывает создание объекта сразу, а только описывает, как это сделать.
 const initializeAssistant = (getState) => {
@@ -48,10 +58,10 @@ export class App extends React.Component {
       this.assistant = initializeAssistant(() => ({ moods: this.state.moods }));
 
       this.assistant.on('data', (event) => {
-        console.log("📩 ПОЛУЧЕН ПАКЕТ:", event);
-        
-        // Корректная обработка входящих команд
+        console.log('📩 Входящий пакет:', event.type, event); // Увидишь тип пакета
+
         if (event.type === 'smart_app_data') {
+          console.log('🚀 УРА! ПРИШЛИ ДАННЫЕ:', event.smart_app_data);
           this.dispatchAssistantAction(event.smart_app_data);
         }
       });

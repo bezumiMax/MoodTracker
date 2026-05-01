@@ -4,6 +4,20 @@
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1, shrink-to-fit=no, viewport-fit=cover" />
     <meta name="theme-color" content="#000000" />
+
+    <script>
+      // Жесткий фикс для SDK Салюта до загрузки всех скриптов
+      window.appConfig = {
+        applicationId: "019de0cf-282b-7797-a8e1-7ae166bef0c6",
+        appversionId: "1.0.0"
+      };
+      window.__STP_CONFIG__ = window.appConfig;
+      
+      // Создаем заглушку, чтобы SDK не падал при попытке чтения глубоких свойств
+      if (!window.AssistantHost) {
+        window.AssistantHost = {};
+      }
+    </script>
     
     <!-- Манифест и иконки -->
     <link rel="manifest" href="%PUBLIC_URL%/manifest.json" />
